@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authorization Required</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .auth-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 80vh;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .auth-box {
+            background: white;
+            padding: 60px 50px;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            max-width: 550px;
+            border-top: 4px solid #C0C0C0;
+        }
+
+        .auth-box h1 {
+            font-family: 'Cormorant Garamond', serif;
+            color: #000;
+            margin-bottom: 20px;
+            font-size: 2.5rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .auth-box p {
+            font-family: 'Montserrat', sans-serif;
+            color: #444;
+            margin-bottom: 30px;
+            line-height: 1.8;
+            font-weight: 500;
+        }
+
+        .auth-steps {
+            text-align: left;
+            margin: 30px 0;
+            padding: 25px;
+            background: #f8f8f8;
+            border-radius: 6px;
+            border-left: 4px solid #C0C0C0;
+        }
+
+        .auth-steps strong {
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 0.85rem;
+        }
+
+        .auth-steps ol {
+            margin-left: 20px;
+            margin-top: 15px;
+        }
+
+        .auth-steps li {
+            margin-bottom: 10px;
+            color: #444;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 400;
+        }
+
+        .btn-authorize {
+            font-family: 'Montserrat', sans-serif;
+            background: #000;
+            color: white;
+            padding: 15px 40px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            border: 2px solid #000;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+
+        .btn-authorize:hover {
+            background: #1a1a1a;
+            border-color: #C0C0C0;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(192, 192, 192, 0.5);
+        }
+
+        .warning {
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            border-left: 4px solid #C0C0C0;
+            color: #555;
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-top: 30px;
+            font-size: 0.85rem;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 300;
+            text-align: left;
+        }
+
+        .warning strong {
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="auth-container">
+            <div class="auth-box">
+                <h1>Authorization Required</h1>
+                <p>This app needs access to your Google Drive to upload wedding photos. Click the button below to authorize.</p>
+
+                <div class="auth-steps">
+                    <strong>What happens next:</strong>
+                    <ol>
+                        <li>You'll be redirected to Google</li>
+                        <li>Sign in with your Google account</li>
+                        <li>Grant permission to access Drive</li>
+                        <li>You'll be redirected back here</li>
+                        <li>The app will work automatically!</li>
+                    </ol>
+                </div>
+
+                <a href="/authorize" class="btn-authorize">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 8px;">
+                        <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path>
+                        <path d="M9 12l2 2 4-4"></path>
+                    </svg>
+                    Authorize with Google
+                </a>
+
+                <div class="warning">
+                    <strong>Note:</strong> You only need to do this once. The app will remember your authorization.
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

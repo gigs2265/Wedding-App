@@ -1,0 +1,16 @@
+venv/
+.env
+credentials.json
+credentials_OLD_SERVICE_ACCOUNT.json.backup
+token.json
+uploads/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Di Cristina Wedding Photo Gallery</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header Section -->
+        <header class="header">
+            <h1 class="title">Wedding Digital Scrap Book</h1>
+            <p class="subtitle">Share your special moments with us!</p>
+        </header>
+
+        <!-- Upload Section -->
+        <section class="upload-section">
+            <div class="upload-header">
+                <div class="decorative-line"></div>
+                <h3 class="upload-title">Capture the Moment</h3>
+                <div class="decorative-line"></div>
+            </div>
+            <p class="upload-description">Preserve our special day by sharing your photos and videos</p>
+
+            <div class="upload-buttons">
+                <!-- Camera Button (for taking photos) -->
+                <button id="cameraBtn" class="btn btn-camera">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                        <circle cx="12" cy="13" r="4"></circle>
+                    </svg>
+                    Take Photo
+                </button>
+
+                <!-- File Upload Button -->
+                <label for="fileInput" class="btn btn-upload">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Upload Files
+                </label>
+                <input type="file" id="fileInput" accept="image/*,video/*" multiple style="display: none;">
+            </div>
+
+            <!-- Upload Status -->
+            <div id="uploadStatus" class="upload-status"></div>
+        </section>
+
+        <!-- Camera Modal (hidden by default) -->
+        <div id="cameraModal" class="modal">
+            <div class="modal-content">
+                <button id="closeCamera" class="close-btn">&times;</button>
+                <video id="cameraStream" autoplay playsinline></video>
+                <div class="camera-controls">
+                    <button id="captureBtn" class="btn btn-capture">Capture Photo</button>
+                    <button id="switchCamera" class="btn btn-switch">Switch Camera</button>
+                </div>
+                <canvas id="photoCanvas" style="display: none;"></canvas>
+            </div>
+        </div>
+
+        <!-- Gallery Section -->
+        <section class="gallery-section">
+            <h2>Gallery</h2>
+            <div id="refreshBtn" class="refresh-container">
+                <button class="btn btn-refresh">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                    Refresh
+                </button>
+            </div>
+            <div id="gallery" class="gallery">
+                <div class="loading">Loading gallery...</div>
+            </div>
+
+            <!-- Load More Button -->
+            <div id="loadMoreContainer" class="load-more-container" style="display: none;">
+                <button id="loadMoreBtn" class="btn btn-load-more">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                    Load More
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
