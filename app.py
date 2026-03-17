@@ -43,8 +43,12 @@ def get_drive_service():
     try:
         creds = None
 
-        # Load existing token
-        if os.path.exists(TOKEN_FILE):
+        # Try to load from environment variable first (for Render)
+        oauth_token = os.getenv('OAUTH_TOKEN')
+        if oauth_token:
+            creds = Credentials.from_authorized_user_info(json.loads(oauth_token), SCOPES)
+        # Fall back to token file (for local development)
+        elif os.path.exists(TOKEN_FILE):
             creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
 
         # If credentials are invalid or don't exist, return None
@@ -53,9 +57,16 @@ def get_drive_service():
             if creds and creds.expired and creds.refresh_token:
                 # Try to refresh the token
                 creds.refresh(Request())
-                # Save the refreshed credentials
-                with open(TOKEN_FILE, 'w') as token:
-                    token.write(creds.to_json())
+                # Save the refreshed credentials (try both methods)
+                token_json = creds.to_json()
+                try:
+                    with open(TOKEN_FILE, 'w') as token:
+                        token.write(token_json)
+                except:
+                    # File write failed (read-only filesystem on Render)
+                    # Token will need to be set as environment variable
+                    print(f"Could not write token file. Set this as OAUTH_TOKEN environment variable:")
+                    print(token_json)
             else:
                 print("Error: No valid credentials. User needs to authorize the app.")
                 return None
@@ -160,10 +171,22 @@ def oauth2callback():
         flow.fetch_token(authorization_response=request.url)
 
         credentials = flow.credentials
+        token_json = credentials.to_json()
 
-        # Save credentials to token.json
-        with open(TOKEN_FILE, 'w') as token:
-            token.write(credentials.to_json())
+        # Try to save credentials to token.json
+        try:
+            with open(TOKEN_FILE, 'w') as token:
+                token.write(token_json)
+            print("Token saved successfully to token.json")
+        except Exception as file_error:
+            # On Render, filesystem might be read-only
+            # Print token so it can be set as environment variable
+            print("=" * 80)
+            print("IMPORTANT: Could not save token to file (read-only filesystem)")
+            print("Copy the token below and set it as OAUTH_TOKEN environment variable in Render:")
+            print("=" * 80)
+            print(token_json)
+            print("=" * 80)
 
         return redirect('/')
     except Exception as e:
@@ -172,6 +195,19 @@ def oauth2callback():
 @app.route('/check-auth')
 def check_auth():
     """Check if user is authenticated"""
+    # Check environment variable first
+    oauth_token = os.getenv('OAUTH_TOKEN')
+    if oauth_token:
+        try:
+            creds = Credentials.from_authorized_user_info(json.loads(oauth_token), SCOPES)
+            if creds and creds.valid:
+                return jsonify({'authenticated': True})
+            elif creds and creds.expired and creds.refresh_token:
+                return jsonify({'authenticated': True, 'needs_refresh': True})
+        except:
+            pass
+
+    # Fall back to token file
     if os.path.exists(TOKEN_FILE):
         try:
             creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
@@ -186,7 +222,19 @@ def check_auth():
 @app.route('/')
 def index():
     """Render main page"""
-    # Check if user needs to authorize
+    # Check environment variable first
+    oauth_token = os.getenv('OAUTH_TOKEN')
+    if oauth_token:
+        try:
+            creds = Credentials.from_authorized_user_info(json.loads(oauth_token), SCOPES)
+            if creds and creds.valid:
+                return render_template('index.html')
+            elif creds and creds.expired and creds.refresh_token:
+                return render_template('index.html')
+        except:
+            pass
+
+    # Check if token file exists
     if not os.path.exists(TOKEN_FILE):
         return render_template('authorize.html')
 
