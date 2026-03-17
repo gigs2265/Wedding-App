@@ -10,9 +10,10 @@ from googleapiclient.http import MediaFileUpload
 from dotenv import load_dotenv
 import json
 
-# Allow OAuth over HTTP for local development
-# IMPORTANT: Remove this in production and use HTTPS
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+# Allow OAuth over HTTP for local development only
+# In production (Render), this should be disabled as HTTPS is used
+if os.getenv('FLASK_ENV') == 'development':
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 # Load environment variables
 load_dotenv()
