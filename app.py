@@ -173,20 +173,22 @@ def oauth2callback():
         credentials = flow.credentials
         token_json = credentials.to_json()
 
-        # Try to save credentials to token.json
+        # ALWAYS print the token for Render setup
+        print("=" * 80)
+        print("OAUTH TOKEN GENERATED - COPY THIS TO RENDER ENVIRONMENT VARIABLES")
+        print("=" * 80)
+        print(token_json)
+        print("=" * 80)
+        print("Set this as OAUTH_TOKEN environment variable in Render dashboard")
+        print("=" * 80)
+
+        # Try to save credentials to token.json (for local development)
         try:
             with open(TOKEN_FILE, 'w') as token:
                 token.write(token_json)
-            print("Token saved successfully to token.json")
+            print("Token also saved to token.json")
         except Exception as file_error:
-            # On Render, filesystem might be read-only
-            # Print token so it can be set as environment variable
-            print("=" * 80)
-            print("IMPORTANT: Could not save token to file (read-only filesystem)")
-            print("Copy the token below and set it as OAUTH_TOKEN environment variable in Render:")
-            print("=" * 80)
-            print(token_json)
-            print("=" * 80)
+            print(f"Could not save token to file: {file_error}")
 
         return redirect('/')
     except Exception as e:
