@@ -141,14 +141,24 @@ def upload_to_drive(file_path, filename):
 def authorize():
     """Start OAuth 2.0 authorization flow"""
     try:
-        if not os.path.exists(CREDENTIALS_FILE):
+        # Try to load credentials from environment variable first (for Render)
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+        if credentials_json:
+            credentials_info = json.loads(credentials_json)
+            flow = Flow.from_client_config(
+                credentials_info,
+                scopes=SCOPES,
+                redirect_uri=url_for('oauth2callback', _external=True)
+            )
+        # Fall back to credentials file (for local development)
+        elif os.path.exists(CREDENTIALS_FILE):
+            flow = Flow.from_client_secrets_file(
+                CREDENTIALS_FILE,
+                scopes=SCOPES,
+                redirect_uri=url_for('oauth2callback', _external=True)
+            )
+        else:
             return "Error: credentials.json not found. Please download it from Google Cloud Console.", 400
-
-        flow = Flow.from_client_secrets_file(
-            CREDENTIALS_FILE,
-            scopes=SCOPES,
-            redirect_uri=url_for('oauth2callback', _external=True)
-        )
 
         authorization_url, state = flow.authorization_url(
             access_type='offline',
@@ -166,12 +176,26 @@ def oauth2callback():
     try:
         state = session.get('state')
 
-        flow = Flow.from_client_secrets_file(
-            CREDENTIALS_FILE,
-            scopes=SCOPES,
-            state=state,
-            redirect_uri=url_for('oauth2callback', _external=True)
-        )
+        # Try to load credentials from environment variable first (for Render)
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+        if credentials_json:
+            credentials_info = json.loads(credentials_json)
+            flow = Flow.from_client_config(
+                credentials_info,
+                scopes=SCOPES,
+                state=state,
+                redirect_uri=url_for('oauth2callback', _external=True)
+            )
+        # Fall back to credentials file (for local development)
+        elif os.path.exists(CREDENTIALS_FILE):
+            flow = Flow.from_client_secrets_file(
+                CREDENTIALS_FILE,
+                scopes=SCOPES,
+                state=state,
+                redirect_uri=url_for('oauth2callback', _external=True)
+            )
+        else:
+            return "Error: credentials.json not found.", 400
 
         flow.fetch_token(authorization_response=request.url)
 
