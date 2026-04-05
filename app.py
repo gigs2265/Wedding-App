@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_file, Response
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime
@@ -6,9 +6,10 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from dotenv import load_dotenv
 import json
+from io import BytesIO
 
 # Allow OAuth over HTTP for local development only
 # In production (Render), this should be disabled as HTTPS is used
@@ -114,7 +115,7 @@ def upload_to_drive(file_path, filename):
         file = service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id, webViewLink, webContentLink'
+            fields='id, webViewLink, webContentLink, thumbnailLink'
         ).execute()
 
         # Make file publicly accessible
@@ -123,10 +124,14 @@ def upload_to_drive(file_path, filename):
             body={'type': 'anyone', 'role': 'reader'}
         ).execute()
 
+        # Use our proxy endpoint to serve thumbnails (avoids CORS issues)
+        file_id = file.get('id')
+        thumbnail_url = url_for('get_thumbnail', file_id=file_id, _external=True)
+
         return {
-            'id': file.get('id'),
+            'id': file_id,
             'link': file.get('webViewLink'),
-            'thumbnail': f"https://drive.google.com/thumbnail?id={file.get('id')}&sz=w400"
+            'thumbnail': thumbnail_url
         }
     except Exception as e:
         print(f"Error uploading to Drive: {e}")
@@ -315,7 +320,7 @@ def get_gallery():
         request_params = {
             'q': query,
             'pageSize': 30,  # Load 30 photos at a time
-            'fields': "nextPageToken, files(id, name, mimeType, createdTime, webViewLink)",
+            'fields': "nextPageToken, files(id, name, mimeType, createdTime, webViewLink, thumbnailLink)",
             'orderBy': "createdTime desc"
         }
 
@@ -331,11 +336,15 @@ def get_gallery():
         for file in files:
             mime_type = file.get('mimeType', '')
             is_video = mime_type.startswith('video/')
+            file_id = file.get('id')
+
+            # Use our proxy endpoint to serve thumbnails (avoids CORS issues)
+            thumbnail_url = url_for('get_thumbnail', file_id=file_id, _external=True)
 
             gallery_items.append({
-                'id': file.get('id'),
+                'id': file_id,
                 'name': file.get('name'),
-                'thumbnail': f"https://drive.google.com/thumbnail?id={file.get('id')}&sz=w400",
+                'thumbnail': thumbnail_url,
                 'link': file.get('webViewLink'),
                 'is_video': is_video,
                 'created': file.get('createdTime')
@@ -349,6 +358,41 @@ def get_gallery():
     except Exception as e:
         print(f"Error fetching gallery: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/thumbnail/<file_id>')
+def get_thumbnail(file_id):
+    """Proxy endpoint to serve Google Drive thumbnails"""
+    try:
+        service = get_drive_service()
+        if not service:
+            return "Drive service not available", 500
+
+        # Get file metadata to determine mime type
+        file_metadata = service.files().get(fileId=file_id, fields='mimeType').execute()
+        mime_type = file_metadata.get('mimeType', 'image/jpeg')
+
+        # Download the file from Google Drive
+        request_file = service.files().get_media(fileId=file_id)
+        file_buffer = BytesIO()
+        downloader = MediaIoBaseDownload(file_buffer, request_file)
+
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+
+        file_buffer.seek(0)
+
+        # Return the file as a response
+        return send_file(
+            file_buffer,
+            mimetype=mime_type,
+            as_attachment=False,
+            download_name=f"{file_id}.jpg"
+        )
+    except Exception as e:
+        print(f"Error fetching thumbnail: {e}")
+        # Return a placeholder grey image on error
+        return "", 404
 
 if __name__ == '__main__':
     # Run the app on all network interfaces so it's accessible from mobile devices
