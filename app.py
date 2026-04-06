@@ -144,6 +144,9 @@ def authorize():
         # Try to load credentials from environment variable first (for Render)
         credentials_json = os.getenv('GOOGLE_CREDENTIALS')
         if credentials_json:
+            print("DEBUG: Loading credentials from GOOGLE_CREDENTIALS env var")
+            print(f"DEBUG: Length: {len(credentials_json)}")
+            print(f"DEBUG: First 200 chars: {repr(credentials_json[:200])}")
             credentials_info = json.loads(credentials_json)
             flow = Flow.from_client_config(
                 credentials_info,
@@ -152,6 +155,7 @@ def authorize():
             )
         # Fall back to credentials file (for local development)
         elif os.path.exists(CREDENTIALS_FILE):
+            print("DEBUG: Loading credentials from file")
             flow = Flow.from_client_secrets_file(
                 CREDENTIALS_FILE,
                 scopes=SCOPES,
