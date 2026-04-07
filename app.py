@@ -166,7 +166,8 @@ def authorize():
 
         authorization_url, state = flow.authorization_url(
             access_type='offline',
-            include_granted_scopes='true'
+            include_granted_scopes='true',
+            prompt='consent'
         )
 
         session['state'] = state
@@ -421,6 +422,32 @@ def get_thumbnail(file_id):
         print(f"Error fetching thumbnail: {e}")
         # Return a placeholder grey image on error
         return "", 404
+
+@app.route('/debug-auth')
+def debug_auth():
+    """Debug endpoint to check authentication status"""
+    oauth_token = os.getenv('OAUTH_TOKEN')
+    has_env_var = bool(oauth_token)
+    has_token_file = os.path.exists(TOKEN_FILE)
+
+    debug_info = {
+        'has_oauth_token_env': has_env_var,
+        'has_token_file': has_token_file,
+        'oauth_token_length': len(oauth_token) if oauth_token else 0,
+        'flask_env': os.getenv('FLASK_ENV', 'not set'),
+        'secret_key_set': bool(os.getenv('SECRET_KEY')),
+        'drive_folder_id': os.getenv('DRIVE_FOLDER_ID', 'not set')
+    }
+
+    if has_env_var:
+        try:
+            token_data = json.loads(oauth_token)
+            debug_info['token_has_refresh'] = 'refresh_token' in token_data
+            debug_info['token_fields'] = list(token_data.keys())
+        except Exception as e:
+            debug_info['token_parse_error'] = str(e)
+
+    return jsonify(debug_info)
 
 if __name__ == '__main__':
     # Run the app on all network interfaces so it's accessible from mobile devices
