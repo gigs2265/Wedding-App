@@ -2,13 +2,14 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime
-from google.auth.transport.requests import Request
+from google.auth.transport.requests import Request, AuthorizedSession
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload, MediaIoBaseUpload
 from dotenv import load_dotenv
 import json
+import re
 from io import BytesIO
 
 # Allow OAuth over HTTP for local development only
@@ -32,6 +33,18 @@ SCOPES = ['https://www.googleapis.com/auth/drive.file']
 CREDENTIALS_FILE = 'credentials.json'
 TOKEN_FILE = 'token.json'
 
+# Drive folder (created by the app) that stores video preview frames
+THUMBNAIL_FOLDER_NAME = 'Wedding App Thumbnails'
+
+# Shown for videos until Google Drive finishes generating their thumbnail
+VIDEO_PLACEHOLDER_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#1a1a1a"/><stop offset="1" stop-color="#3a3a3a"/></linearGradient></defs>
+<rect width="400" height="400" fill="url(#g)"/>
+<text x="200" y="300" text-anchor="middle" fill="#C0C0C0" font-family="Montserrat, sans-serif"
+ font-size="22" letter-spacing="3">VIDEO</text>
+</svg>'''
+
 # Create uploads folder if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -39,8 +52,8 @@ def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def get_drive_service():
-    """Initialize Google Drive service with OAuth 2.0"""
+def get_credentials():
+    """Load (and refresh if needed) the OAuth 2.0 credentials"""
     try:
         creds = None
 
@@ -72,13 +85,50 @@ def get_drive_service():
                 print("Error: No valid credentials. User needs to authorize the app.")
                 return None
 
+        return creds
+    except Exception as e:
+        print(f"Error loading credentials: {e}")
+        return None
+
+def get_drive_service():
+    """Initialize Google Drive service with OAuth 2.0"""
+    try:
+        creds = get_credentials()
+        if not creds:
+            return None
+
         service = build('drive', 'v3', credentials=creds)
         return service
     except Exception as e:
         print(f"Error initializing Drive service: {e}")
         return None
 
-def upload_to_drive(file_path, filename):
+thumbnail_folder_id = None
+
+def get_thumbnail_folder_id(service):
+    """Find or create the Drive folder that holds video preview frames.
+    Kept outside the wedding folder so the thumbnails don't show up in the gallery."""
+    global thumbnail_folder_id
+    if thumbnail_folder_id:
+        return thumbnail_folder_id
+
+    folder_mime = 'application/vnd.google-apps.folder'
+    results = service.files().list(
+        q=f"name='{THUMBNAIL_FOLDER_NAME}' and mimeType='{folder_mime}' and trashed=false",
+        fields='files(id)'
+    ).execute()
+    folders = results.get('files', [])
+    if folders:
+        thumbnail_folder_id = folders[0]['id']
+    else:
+        folder = service.files().create(
+            body={'name': THUMBNAIL_FOLDER_NAME, 'mimeType': folder_mime},
+            fields='id'
+        ).execute()
+        thumbnail_folder_id = folder['id']
+    return thumbnail_folder_id
+
+def upload_to_drive(file_path, filename, thumbnail_bytes=None):
     """Upload file to Google Drive"""
     try:
         service = get_drive_service()
@@ -95,6 +145,20 @@ def upload_to_drive(file_path, filename):
         # Add to specific folder if folder_id is provided
         if folder_id and folder_id != 'your_folder_id_here':
             file_metadata['parents'] = [folder_id]
+
+        # Save the browser-generated preview frame (videos) as its own small file.
+        # Drive ignores custom thumbnails for videos and its own can take a long time,
+        # so /thumbnail serves this one until Drive's is ready.
+        if thumbnail_bytes:
+            try:
+                thumb = service.files().create(
+                    body={'name': f"thumb_{filename}.jpg", 'parents': [get_thumbnail_folder_id(service)]},
+                    media_body=MediaIoBaseUpload(BytesIO(thumbnail_bytes), mimetype='image/jpeg'),
+                    fields='id'
+                ).execute()
+                file_metadata['appProperties'] = {'thumbnail_id': thumb['id']}
+            except Exception as e:
+                print(f"Error saving video thumbnail: {e}")
 
         # Determine MIME type based on file extension
         ext = filename.rsplit('.', 1)[1].lower()
@@ -305,8 +369,16 @@ def upload_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
+        # Optional preview frame sent by the browser for videos (Drive allows up to 2MB)
+        thumbnail_bytes = None
+        thumbnail_file = request.files.get('thumbnail')
+        if thumbnail_file:
+            thumbnail_bytes = thumbnail_file.read()
+            if len(thumbnail_bytes) > 2 * 1024 * 1024:
+                thumbnail_bytes = None
+
         # Upload to Google Drive
-        drive_result = upload_to_drive(filepath, filename)
+        drive_result = upload_to_drive(filepath, filename, thumbnail_bytes)
 
         if drive_result:
             # Optionally delete local file after successful upload to save space
@@ -392,15 +464,42 @@ def get_gallery():
 def get_thumbnail(file_id):
     """Proxy endpoint to serve Google Drive thumbnails"""
     try:
-        service = get_drive_service()
-        if not service:
+        creds = get_credentials()
+        if not creds:
             return "Drive service not available", 500
+        service = build('drive', 'v3', credentials=creds)
 
-        # Get file metadata to determine mime type
-        file_metadata = service.files().get(fileId=file_id, fields='mimeType').execute()
+        # Get file metadata to determine mime type and Drive's generated thumbnail
+        file_metadata = service.files().get(fileId=file_id, fields='mimeType, thumbnailLink, appProperties').execute()
         mime_type = file_metadata.get('mimeType', 'image/jpeg')
+        thumbnail_link = file_metadata.get('thumbnailLink')
+        saved_thumbnail_id = (file_metadata.get('appProperties') or {}).get('thumbnail_id')
 
-        # Download the file from Google Drive
+        # Use Drive's thumbnail when available (works for videos and HEIC, and is
+        # much smaller than the original file). Request a 400px version.
+        if thumbnail_link:
+            thumbnail_link = re.sub(r'=s\d+$', '=s400', thumbnail_link)
+            thumb_response = AuthorizedSession(creds).get(thumbnail_link, timeout=30)
+            if thumb_response.ok:
+                response = Response(thumb_response.content,
+                                    mimetype=thumb_response.headers.get('Content-Type', 'image/jpeg'))
+                response.headers['Cache-Control'] = 'public, max-age=86400'
+                return response
+
+        # Preview frame the guest's browser captured when the video was uploaded
+        if saved_thumbnail_id:
+            thumb_bytes = service.files().get_media(fileId=saved_thumbnail_id).execute()
+            response = Response(thumb_bytes, mimetype='image/jpeg')
+            response.headers['Cache-Control'] = 'public, max-age=86400'
+            return response
+
+        # Drive hasn't made a thumbnail yet (videos can take a long time to process)
+        if mime_type.startswith('video/'):
+            response = Response(VIDEO_PLACEHOLDER_SVG, mimetype='image/svg+xml')
+            response.headers['Cache-Control'] = 'no-store'
+            return response
+
+        # Fall back to downloading the original image from Google Drive
         request_file = service.files().get_media(fileId=file_id)
         file_buffer = BytesIO()
         downloader = MediaIoBaseDownload(file_buffer, request_file)

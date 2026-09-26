@@ -111,6 +111,62 @@ function handleFileSelect(event) {
     event.target.value = '';
 }
 
+// Check if a file is a video (some phones leave file.type empty for .mov)
+function isVideoFile(file) {
+    return file.type.startsWith('video/') || /\.(mp4|mov|avi|webm)$/i.test(file.name);
+}
+
+// Grab a frame from a video file to use as its gallery thumbnail.
+// Resolves to a JPEG blob, or null if the browser can't decode the video.
+function createVideoThumbnail(file) {
+    return new Promise((resolve) => {
+        const video = document.createElement('video');
+        const url = URL.createObjectURL(file);
+        let finished = false;
+
+        const finish = (blob) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            video.removeAttribute('src');
+            video.load();
+            URL.revokeObjectURL(url);
+            resolve(blob);
+        };
+
+        // Never hold up the upload for long
+        const timer = setTimeout(() => finish(null), 8000);
+
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+
+        video.addEventListener('loadeddata', () => {
+            // Skip the first instant, which is often a black frame
+            const duration = isFinite(video.duration) ? video.duration : 0;
+            video.currentTime = Math.min(0.5, duration / 2);
+        });
+
+        video.addEventListener('seeked', () => {
+            try {
+                const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.round(video.videoWidth * scale);
+                canvas.height = Math.round(video.videoHeight * scale);
+                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob((blob) => finish(blob), 'image/jpeg', 0.8);
+            } catch (error) {
+                finish(null);
+            }
+        });
+
+        video.addEventListener('error', () => finish(null));
+
+        video.src = url;
+        video.load();
+    });
+}
+
 // Upload File
 async function uploadFile(file) {
     const formData = new FormData();
@@ -118,6 +174,13 @@ async function uploadFile(file) {
 
     const statusId = Date.now();
     showStatus(`Uploading ${file.name}...`, 'loading', statusId);
+
+    if (isVideoFile(file)) {
+        const thumbnail = await createVideoThumbnail(file);
+        if (thumbnail) {
+            formData.append('thumbnail', thumbnail, 'thumbnail.jpg');
+        }
+    }
 
     try {
         const response = await fetch('/upload', {
