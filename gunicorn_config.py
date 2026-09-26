@@ -12,8 +12,9 @@ worker_class = 'gthread'
 # Free tier has limited CPU, so keep this modest
 workers = 2
 
-# Each worker can handle multiple concurrent connections with threads
-threads = 4  # 2 workers × 4 threads = 8 concurrent uploads
+# Each worker can handle multiple concurrent connections with threads.
+# Requests mostly wait on Google Drive (not CPU), so more threads = more guests served at once.
+threads = 8  # 2 workers × 8 threads = 16 concurrent requests
 
 # Timeout for uploads (important for large files)
 timeout = 300  # 5 minutes for large video uploads

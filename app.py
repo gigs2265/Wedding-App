@@ -10,6 +10,8 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload, MediaIoBa
 from dotenv import load_dotenv
 import json
 import re
+import threading
+from collections import OrderedDict
 from io import BytesIO
 
 # Allow OAuth over HTTP for local development only
@@ -52,7 +54,29 @@ def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+# Credentials are loaded once per worker process and shared, so requests don't each
+# re-read and re-refresh the token. Drive clients aren't thread-safe, so each
+# thread keeps its own (building one costs noticeable CPU on the small server).
+_creds = None
+_creds_lock = threading.Lock()
+_thread_local = threading.local()
+
 def get_credentials():
+    """Return cached OAuth 2.0 credentials, loading or refreshing them if needed"""
+    global _creds
+    with _creds_lock:
+        if _creds and _creds.valid:
+            return _creds
+        if _creds and _creds.expired and _creds.refresh_token:
+            try:
+                _creds.refresh(Request())
+                return _creds
+            except Exception as e:
+                print(f"Error refreshing cached credentials: {e}")
+        _creds = load_credentials()
+        return _creds
+
+def load_credentials():
     """Load (and refresh if needed) the OAuth 2.0 credentials"""
     try:
         creds = None
@@ -97,11 +121,49 @@ def get_drive_service():
         if not creds:
             return None
 
-        service = build('drive', 'v3', credentials=creds)
-        return service
+        # Reuse this thread's Drive client while the credentials are unchanged
+        if getattr(_thread_local, 'creds', None) is not creds:
+            _thread_local.service = build('drive', 'v3', credentials=creds)
+            _thread_local.session = AuthorizedSession(creds)
+            _thread_local.creds = creds
+        return _thread_local.service
     except Exception as e:
         print(f"Error initializing Drive service: {e}")
         return None
+
+# In-memory cache of thumbnail images. Every guest sees the same gallery, so after
+# the first guest loads a thumbnail the rest are served without calling Google.
+THUMBNAIL_CACHE_MAX_BYTES = 40 * 1024 * 1024  # per worker process
+THUMBNAIL_CACHE_MAX_ITEM_BYTES = 1024 * 1024
+_thumbnail_cache = OrderedDict()  # file_id -> (bytes, mimetype)
+_thumbnail_cache_bytes = 0
+_thumbnail_cache_lock = threading.Lock()
+
+def get_cached_thumbnail(file_id):
+    with _thumbnail_cache_lock:
+        item = _thumbnail_cache.get(file_id)
+        if item:
+            _thumbnail_cache.move_to_end(file_id)
+        return item
+
+def cache_thumbnail(file_id, data, mimetype):
+    global _thumbnail_cache_bytes
+    if len(data) > THUMBNAIL_CACHE_MAX_ITEM_BYTES:
+        return
+    with _thumbnail_cache_lock:
+        if file_id in _thumbnail_cache:
+            return
+        _thumbnail_cache[file_id] = (data, mimetype)
+        _thumbnail_cache_bytes += len(data)
+        # Drop the least recently viewed thumbnails once over budget
+        while _thumbnail_cache_bytes > THUMBNAIL_CACHE_MAX_BYTES:
+            _, (old_data, _) = _thumbnail_cache.popitem(last=False)
+            _thumbnail_cache_bytes -= len(old_data)
+
+def thumbnail_response(data, mimetype):
+    response = Response(data, mimetype=mimetype)
+    response.headers['Cache-Control'] = 'public, max-age=86400'
+    return response
 
 thumbnail_folder_id = None
 
@@ -270,6 +332,11 @@ def oauth2callback():
 
         credentials = flow.credentials
         token_json = credentials.to_json()
+
+        # Drop the cached credentials so the new authorization is picked up
+        global _creds
+        with _creds_lock:
+            _creds = None
 
         # ALWAYS print the token for Render setup
         print("=" * 80)
@@ -466,11 +533,14 @@ def get_gallery():
 @app.route('/thumbnail/<file_id>')
 def get_thumbnail(file_id):
     """Proxy endpoint to serve Google Drive thumbnails"""
+    cached = get_cached_thumbnail(file_id)
+    if cached:
+        return thumbnail_response(*cached)
+
     try:
-        creds = get_credentials()
-        if not creds:
+        service = get_drive_service()
+        if not service:
             return "Drive service not available", 500
-        service = build('drive', 'v3', credentials=creds)
 
         # Get file metadata to determine mime type and Drive's generated thumbnail
         file_metadata = service.files().get(fileId=file_id, fields='mimeType, thumbnailLink, appProperties').execute()
@@ -482,19 +552,18 @@ def get_thumbnail(file_id):
         # much smaller than the original file). Request a 400px version.
         if thumbnail_link:
             thumbnail_link = re.sub(r'=s\d+$', '=s400', thumbnail_link)
-            thumb_response = AuthorizedSession(creds).get(thumbnail_link, timeout=30)
+            thumb_response = _thread_local.session.get(thumbnail_link, timeout=30)
             if thumb_response.ok:
-                response = Response(thumb_response.content,
-                                    mimetype=thumb_response.headers.get('Content-Type', 'image/jpeg'))
-                response.headers['Cache-Control'] = 'public, max-age=86400'
-                return response
+                data = thumb_response.content
+                thumb_mime = thumb_response.headers.get('Content-Type', 'image/jpeg')
+                cache_thumbnail(file_id, data, thumb_mime)
+                return thumbnail_response(data, thumb_mime)
 
         # Preview frame the guest's browser captured when the video was uploaded
         if saved_thumbnail_id:
-            thumb_bytes = service.files().get_media(fileId=saved_thumbnail_id).execute()
-            response = Response(thumb_bytes, mimetype='image/jpeg')
-            response.headers['Cache-Control'] = 'public, max-age=86400'
-            return response
+            data = service.files().get_media(fileId=saved_thumbnail_id).execute()
+            cache_thumbnail(file_id, data, 'image/jpeg')
+            return thumbnail_response(data, 'image/jpeg')
 
         # Drive hasn't made a thumbnail yet (videos can take a long time to process)
         if mime_type.startswith('video/'):
@@ -503,6 +572,7 @@ def get_thumbnail(file_id):
             return response
 
         # Fall back to downloading the original image from Google Drive
+        # (only until Drive generates a thumbnail, so it isn't cached)
         request_file = service.files().get_media(fileId=file_id)
         file_buffer = BytesIO()
         downloader = MediaIoBaseDownload(file_buffer, request_file)
