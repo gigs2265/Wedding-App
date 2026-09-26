@@ -375,8 +375,18 @@ function displayGallery(files, reset = true) {
         img.alt = file.name;
         img.loading = 'lazy';
 
-        // Handle image load error
+        // Handle image load error: retry a couple of times (the server can be
+        // briefly busy when lots of guests load at once), then show a placeholder
+        let retries = 0;
         img.onerror = () => {
+            if (retries < 2) {
+                retries++;
+                setTimeout(() => {
+                    img.src = `${file.thumbnail}?retry=${retries}`;
+                }, 2000 * retries);
+                return;
+            }
+            img.onerror = null;
             img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Crect fill="%23ddd" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" fill="%23999" font-size="14"%3EImage%3C/text%3E%3C/svg%3E';
         };
 
