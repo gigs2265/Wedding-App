@@ -250,6 +250,16 @@ body::before {
     transform: translateY(0);
 }
 
+.upload-hint {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: #777;
+    text-align: center;
+    margin-top: 18px;
+    letter-spacing: 0.3px;
+}
+
 /* Upload Status */
 .upload-status {
     margin-top: 20px;
