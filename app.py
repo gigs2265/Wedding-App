@@ -381,9 +381,12 @@ def upload_file():
         drive_result = upload_to_drive(filepath, filename, thumbnail_bytes)
 
         if drive_result:
-            # Optionally delete local file after successful upload to save space
-            # Uncomment the line below if you want to delete local copies
-            # os.remove(filepath)
+            # Delete the local copy once it's safely in Drive, so large videos
+            # don't fill up the server's disk
+            try:
+                os.remove(filepath)
+            except OSError as e:
+                print(f"Could not delete local copy {filepath}: {e}")
 
             is_video = filename.rsplit('.', 1)[1].lower() in {'mp4', 'mov', 'avi', 'webm'}
 

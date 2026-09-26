@@ -4,6 +4,10 @@ let currentFacingMode = 'environment'; // Start with back camera
 let nextPageToken = null;
 let isLoadingMore = false;
 
+// Must match MAX_CONTENT_LENGTH in app.py
+const MAX_UPLOAD_MB = 100;
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
 // DOM Elements
 const cameraBtn = document.getElementById('cameraBtn');
 const fileInput = document.getElementById('fileInput');
@@ -167,13 +171,45 @@ function createVideoThumbnail(file) {
     });
 }
 
+// Send the upload with XMLHttpRequest so we can show progress (fetch can't)
+function sendUpload(formData, onProgress) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/upload');
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                onProgress(Math.round((e.loaded / e.total) * 100));
+            }
+        });
+        xhr.addEventListener('load', () => {
+            let result = {};
+            try {
+                result = JSON.parse(xhr.responseText);
+            } catch (error) {
+                // Non-JSON response (e.g. proxy error page)
+            }
+            resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, result });
+        });
+        xhr.addEventListener('error', () => reject(new Error('Network error')));
+        xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
+        xhr.send(formData);
+    });
+}
+
 // Upload File
 async function uploadFile(file) {
+    const statusId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+        const sizeMB = Math.round(file.size / (1024 * 1024));
+        showStatus(`${file.name} is too large (${sizeMB} MB). The limit is ${MAX_UPLOAD_MB} MB - try a shorter clip.`, 'error', statusId);
+        return;
+    }
+
     const formData = new FormData();
     formData.append('file', file);
 
-    const statusId = Date.now();
-    showStatus(`Uploading ${file.name}...`, 'loading', statusId);
+    showStatus(`Preparing ${file.name}...`, 'loading', statusId);
 
     if (isVideoFile(file)) {
         const thumbnail = await createVideoThumbnail(file);
@@ -182,13 +218,17 @@ async function uploadFile(file) {
         }
     }
 
+    showStatus(`Uploading ${file.name}... 0%`, 'loading', statusId);
+
     try {
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
+        const response = await sendUpload(formData, (percent) => {
+            const message = percent < 100
+                ? `Uploading ${file.name}... ${percent}%`
+                : `Saving ${file.name} to the album...`;
+            updateStatusText(statusId, message);
         });
 
-        const result = await response.json();
+        const result = response.result;
 
         if (response.ok && result.success) {
             showStatus(`Successfully uploaded ${file.name}!`, 'success', statusId);
@@ -197,12 +237,22 @@ async function uploadFile(file) {
                 nextPageToken = null;
                 loadGallery(true);
             }, 1000);
+        } else if (response.status === 413) {
+            showStatus(`${file.name} is too large. The limit is ${MAX_UPLOAD_MB} MB - try a shorter clip.`, 'error', statusId);
         } else {
             showStatus(`Error: ${result.error || 'Upload failed'}`, 'error', statusId);
         }
     } catch (error) {
         console.error('Upload error:', error);
         showStatus(`Error uploading ${file.name}. Please try again.`, 'error', statusId);
+    }
+}
+
+// Update the text of an existing status message (for upload progress)
+function updateStatusText(id, message) {
+    const statusDiv = document.getElementById(`status-${id}`);
+    if (statusDiv) {
+        statusDiv.textContent = message;
     }
 }
 
